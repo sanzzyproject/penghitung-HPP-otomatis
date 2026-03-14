@@ -1,156 +1,184 @@
 'use client';
-import { useState, useEffect } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import BusinessModeSelector from '@/components/BusinessModeSelector';
-import InputBahanBaku from '@/components/InputBahanBaku';
-import InputBiaya from '@/components/InputBiaya';
-import InputProduk from '@/components/InputProduk';
+import BahanBakuInput from '@/components/BahanBakuInput';
+import BiayaInput from '@/components/BiayaInput';
+import ProdukInput from '@/components/ProdukInput';
 import HPPResult from '@/components/HPPResult';
 import ProfitProjection from '@/components/ProfitProjection';
+import ChartProfit from '@/components/ChartProfit';
 import BundlingCalculator from '@/components/BundlingCalculator';
 import HistoryPanel from '@/components/HistoryPanel';
-import ExportButton from '@/components/ExportButton';
 import { useIndexedDB } from '@/hooks/useIndexedDB';
-import { hitungHasilPerhitungan, hitungProyeksiBulanan } from '@/lib/calculator';
-import { BahanBaku, Biaya, Produk, HasilPerhitungan, DataPerhitungan, ProyeksiBulanan } from '@/types';
+import { hitungHasilPerhitungan } from '@/lib/calculations';
+import { exportToExcel } from '@/lib/export';
+import { BahanBaku, BiayaPengolahan, ProdukTurunan, HasilPerhitungan, CalculationData } from '@/types';
+import { Save, Download, Calculator } from 'lucide-react';
 
 export default function Home() {
-  const [mode, setMode] = useState('produksi');
-  const [namaBisnis, setNamaBisnis] = useState('Pengolahan Kelapa');
-  const [batchPerBulan, setBatchPerBulan] = useState(1);
-  const [bahanBaku, setBahanBaku] = useState<BahanBaku[]>([
-    { id: '1', nama: 'Kelapa Utuh', harga: 15000000, jumlah: 1000, satuan: 'kg' }
-  ]);
-  const [biaya, setBiaya] = useState<Biaya[]>([
-    { id: '1', nama: 'Upah Tenaga Pengupasan', harga: 150000, periode: 'Per Batch' },
-    { id: '2', nama: 'Biaya Operasional Mesin', harga: 200000, periode: 'Per Batch' },
-    { id: '3', nama: 'Biaya Pengemasan', harga: 100000, periode: 'Per Batch' },
-  ]);
-  const [produk, setProduk] = useState<Produk[]>([
-    { id: '1', nama: 'Santan Kelapa', qty: 300, satuan: 'kg', hargaJual: 20000 },
-    { id: '2', nama: 'Daging Kelapa Parut', qty: 300, satuan: 'kg', hargaJual: 25000 },
-    { id: '3', nama: 'Minyak Kelapa Murni (VCO)', qty: 150, satuan: 'kg', hargaJual: 50000 },
-    { id: '4', nama: 'Air Kelapa Kemasan', qty: 250, satuan: 'kg', hargaJual: 10000 },
-    { id: '5', nama: 'Sabut Kelapa Kering', qty: 100, satuan: 'kg', hargaJual: 5000 },
-  ]);
+  const { calculations, loading, save, remove, get } = useIndexedDB();
+
+  // State utama
+  const [businessName, setBusinessName] = useState('');
+  const [businessMode, setBusinessMode] = useState('produksi-turunan');
+  const [batchPerMonth, setBatchPerMonth] = useState(1);
+  const [bahanBaku, setBahanBaku] = useState<BahanBaku[]>([]);
+  const [biayaPengolahan, setBiayaPengolahan] = useState<BiayaPengolahan[]>([]);
+  const [produkTurunan, setProdukTurunan] = useState<ProdukTurunan[]>([]);
   const [hasil, setHasil] = useState<HasilPerhitungan | null>(null);
   const [targetLaba, setTargetLaba] = useState(10000000);
-  const [biayaTetap, setBiayaTetap] = useState(100000);
-  const [proyeksi, setProyeksi] = useState<ProyeksiBulanan | null>(null);
+  const [hargaPilihan, setHargaPilihan] = useState(0);
 
-  const { isReady, simpanPerhitungan } = useIndexedDB();
+  // Hitung HPP
+  const handleHitung = () => {
+    const result = hitungHasilPerhitungan(bahanBaku, biayaPengolahan, produkTurunan, batchPerMonth);
+    setHasil(result);
+  };
 
-  useEffect(() => {
-    if (bahanBaku.length && produk.length) {
-      const h = hitungHasilPerhitungan(bahanBaku, biaya, produk, batchPerBulan);
-      setHasil(h);
-    } else setHasil(null);
-  }, [bahanBaku, biaya, produk, batchPerBulan]);
-
-  useEffect(() => {
-    if (hasil) setProyeksi(hitungProyeksiBulanan(hasil, batchPerBulan, biayaTetap, targetLaba));
-    else setProyeksi(null);
-  }, [hasil, batchPerBulan, biayaTetap, targetLaba]);
-
-  const handleSimpan = async () => {
-    if (!hasil || !isReady) return;
-    const data: DataPerhitungan = {
-      id: Date.now().toString(),
-      timestamp: Date.now(),
-      mode,
-      namaBisnis,
-      batchPerBulan,
+  // Simpan ke IndexedDB
+  const handleSave = async () => {
+    if (!hasil) {
+      alert('Hitung HPP terlebih dahulu!');
+      return;
+    }
+    const data: Omit<CalculationData, 'id' | 'createdAt'> = {
+      businessName,
+      businessMode,
+      batchPerMonth,
       bahanBaku,
-      biaya,
-      produk,
-      targetLaba,
-      hasil,
+      biayaPengolahan,
+      produkTurunan,
+      hasilPerhitungan: hasil,
+      bundling: [], // bisa ditambahkan nanti
     };
-    try {
-      await simpanPerhitungan(data);
-      alert('Disimpan!');
-    } catch (error) {
-      alert('Gagal menyimpan');
+    await save(data);
+    alert('Perhitungan disimpan!');
+  };
+
+  // Load data dari riwayat
+  const handleLoad = async (id: number) => {
+    const data = await get(id);
+    if (data) {
+      setBusinessName(data.businessName);
+      setBusinessMode(data.businessMode);
+      setBatchPerMonth(data.batchPerMonth);
+      setBahanBaku(data.bahanBaku);
+      setBiayaPengolahan(data.biayaPengolahan);
+      setProdukTurunan(data.produkTurunan);
+      if (data.hasilPerhitungan) setHasil(data.hasilPerhitungan);
     }
   };
 
-  const handleLoad = (data: DataPerhitungan) => {
-    setMode(data.mode);
-    setNamaBisnis(data.namaBisnis);
-    setBatchPerBulan(data.batchPerBulan);
-    setBahanBaku(data.bahanBaku);
-    setBiaya(data.biaya);
-    setProduk(data.produk);
-    if (data.targetLaba) setTargetLaba(data.targetLaba);
+  // Export Excel
+  const handleExport = (data: CalculationData) => {
+    exportToExcel(data);
   };
 
-  const handleSetHargaJual = (harga: number) => {
-    setProduk(prev => prev.map(p => ({ ...p, hargaJual: harga })));
-  };
+  // Proyeksi laba bulanan untuk grafik
+  const labaBulanan = hasil ? (hasil.totalPotensiPenjualan - hasil.totalBiayaProduksi) * batchPerMonth - 100000 : 0;
 
   return (
-    <main className="min-h-screen bg-gray-50 p-4 md:p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold">Kalkulator HPP Bisnis</h1>
-          <div className="flex gap-2">
-            <HistoryPanel onLoad={handleLoad} />
-            {hasil && (
-              <ExportButton
-                data={{
-                  id: '',
-                  timestamp: Date.now(),
-                  mode,
-                  namaBisnis,
-                  batchPerBulan,
-                  bahanBaku,
-                  biaya,
-                  produk,
-                  targetLaba,
-                  hasil,
-                }}
-                proyeksi={proyeksi || undefined}
-              />
-            )}
+    <main className="container mx-auto px-4 py-6 max-w-7xl">
+      <h1 className="text-2xl font-bold mb-6">Kalkulator HPP & Bundling</h1>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Kolom Kiri: Form Input */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Mode Bisnis */}
+          <div className="bg-white p-4 rounded-lg shadow border">
+            <h2 className="font-semibold mb-3">Pilih Mode Bisnis</h2>
+            <BusinessModeSelector selectedMode={businessMode} onSelect={setBusinessMode} />
           </div>
-        </div>
 
-        <BusinessModeSelector selectedMode={mode} onSelect={setMode} />
-
-        <div className="bg-white p-4 rounded-xl shadow space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Data Bisnis */}
+          <div className="bg-white p-4 rounded-lg shadow border space-y-4">
             <div>
               <label className="block text-sm font-medium">Nama Bisnis / Produk Utama</label>
-              <input type="text" value={namaBisnis} onChange={e => setNamaBisnis(e.target.value)} className="mt-1 block w-full border rounded-md px-3 py-2" />
+              <input
+                type="text"
+                value={businessName}
+                onChange={(e) => setBusinessName(e.target.value)}
+                className="w-full p-2 border rounded mt-1"
+                placeholder="Contoh: Pengolahan Kelapa"
+              />
             </div>
             <div>
-              <label className="block text-sm font-medium">Jumlah Batch per Bulan</label>
-              <input type="number" value={batchPerBulan} onChange={e => setBatchPerBulan(Number(e.target.value))} className="mt-1 block w-full border rounded-md px-3 py-2" min="1" />
+              <label className="block text-sm font-medium">Jumlah Batch Produksi per Bulan</label>
+              <input
+                type="number"
+                min="1"
+                value={batchPerMonth}
+                onChange={(e) => setBatchPerMonth(Number(e.target.value) || 1)}
+                className="w-full p-2 border rounded mt-1"
+              />
             </div>
           </div>
-          <InputBahanBaku bahanBaku={bahanBaku} onChange={setBahanBaku} />
-          <InputBiaya biaya={biaya} onChange={setBiaya} />
-          <InputProduk produk={produk} onChange={setProduk} />
-          <button onClick={handleSimpan} className="w-full md:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg">Simpan Perhitungan</button>
+
+          {/* Bahan Baku */}
+          <div className="bg-white p-4 rounded-lg shadow border">
+            <BahanBakuInput bahanBaku={bahanBaku} onChange={setBahanBaku} />
+          </div>
+
+          {/* Biaya Pengolahan */}
+          <div className="bg-white p-4 rounded-lg shadow border">
+            <BiayaInput biaya={biayaPengolahan} onChange={setBiayaPengolahan} />
+          </div>
+
+          {/* Produk Turunan */}
+          <div className="bg-white p-4 rounded-lg shadow border">
+            <ProdukInput produk={produkTurunan} onChange={setProdukTurunan} />
+          </div>
+
+          {/* Tombol Hitung */}
+          <button
+            onClick={handleHitung}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2"
+          >
+            <Calculator size={20} />
+            Hitung HPP & Proyeksi
+          </button>
+
+          {/* Hasil Perhitungan */}
+          {hasil && (
+            <>
+              <HPPResult hasil={hasil} />
+              <ProfitProjection
+                produkTurunan={produkTurunan}
+                hasil={hasil}
+                batchPerMonth={batchPerMonth}
+                onTargetChange={(target, harga) => {
+                  setTargetLaba(target);
+                  setHargaPilihan(harga);
+                }}
+              />
+              <ChartProfit labaBulanan={labaBulanan} />
+              <BundlingCalculator produkTurunan={produkTurunan} hppPerProduk={hasil.hppPerProduk} />
+            </>
+          )}
         </div>
 
-        {hasil && (
-          <div className="bg-white p-4 rounded-xl shadow space-y-6">
-            <HPPResult hasil={hasil} produk={produk} />
-            <button onClick={handleSimpan} className="px-6 py-2 bg-blue-600 text-white rounded-lg">Simpan Perhitungan</button>
-          </div>
-        )}
+        {/* Kolom Kanan: Riwayat & Simpan */}
+        <div className="space-y-6">
+          {/* Tombol Simpan */}
+          {hasil && (
+            <button
+              onClick={handleSave}
+              className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2"
+            >
+              <Save size={20} />
+              Simpan Perhitungan
+            </button>
+          )}
 
-        {hasil && (
-          <div className="bg-white p-4 rounded-xl shadow space-y-6">
-            <ProfitProjection hasil={hasil} batchPerBulan={batchPerBulan} onSetHargaJual={handleSetHargaJual} />
-          </div>
-        )}
-
-        {hasil && (
-          <div className="bg-white p-4 rounded-xl shadow space-y-6">
-            <BundlingCalculator produk={produk} hasilRincian={hasil.rincianProduk} />
-          </div>
-        )}
+          {/* Riwayat */}
+          <HistoryPanel
+            calculations={calculations}
+            onLoad={handleLoad}
+            onDelete={remove}
+            onExport={handleExport}
+          />
+        </div>
       </div>
     </main>
   );
