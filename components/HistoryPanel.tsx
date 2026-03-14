@@ -1,69 +1,55 @@
-'use client';
-import { useState, useEffect } from 'react';
-import { useIndexedDB } from '@/hooks/useIndexedDB';
-import { DataPerhitungan } from '@/types';
-import { Clock, Trash2 } from 'lucide-react';
+import React from 'react';
+import { CalculationData } from '@/types';
+import { Trash2, Download, Eye } from 'lucide-react';
 
-export default function HistoryPanel({ onLoad }: { onLoad: (data: DataPerhitungan) => void }) {
-  const [history, setHistory] = useState<DataPerhitungan[]>([]);
-  const [open, setOpen] = useState(false);
-  const { isReady, ambilRiwayat, hapusPerhitungan } = useIndexedDB();
+interface Props {
+  calculations: CalculationData[];
+  onLoad: (id: number) => void;
+  onDelete: (id: number) => void;
+  onExport: (data: CalculationData) => void;
+}
 
-  const load = async () => {
-    if (!isReady) return;
-    const data = await ambilRiwayat();
-    setHistory(data);
-  };
-
-  useEffect(() => {
-    if (open && isReady) {
-      load();
-    }
-  }, [open, isReady]);
-
-  const hapus = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    await hapusPerhitungan(id);
-    load(); // reload setelah hapus
+const HistoryPanel: React.FC<Props> = ({ calculations, onLoad, onDelete, onExport }) => {
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   };
 
   return (
-    <div className="relative">
-      <button onClick={() => setOpen(!open)} className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-lg">
-        <Clock className="w-5 h-5" /> Riwayat
-      </button>
-      {open && (
-        <div className="absolute right-0 mt-2 w-80 bg-white border rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
-          <div className="p-3 border-b flex justify-between items-center">
-            <h3 className="font-semibold">Riwayat Perhitungan</h3>
-            <button onClick={() => setOpen(false)} className="text-gray-500">Tutup</button>
-          </div>
-          {!isReady ? (
-            <p className="p-4 text-gray-400">Memuat...</p>
-          ) : history.length === 0 ? (
-            <p className="p-4 text-gray-400">Kosong</p>
-          ) : (
-            <ul>
-              {history.map(item => (
-                <li
-                  key={item.id}
-                  onClick={() => { onLoad(item); setOpen(false); }}
-                  className="p-3 border-b hover:bg-gray-50 cursor-pointer flex justify-between items-start"
-                >
-                  <div>
-                    <p className="font-medium">{item.namaBisnis}</p>
-                    <p className="text-xs text-gray-500">{new Date(item.timestamp).toLocaleDateString()}</p>
-                    <p className="text-xs">Laba: Rp {item.hasil.laba.toLocaleString()}</p>
-                  </div>
-                  <button onClick={e => hapus(item.id, e)} className="text-red-500 p-1">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+    <div className="bg-white p-4 rounded-lg shadow border space-y-3">
+      <h3 className="font-semibold">Riwayat Perhitungan</h3>
+      {calculations.length === 0 ? (
+        <p className="text-gray-500 text-sm">Belum ada data tersimpan.</p>
+      ) : (
+        <div className="space-y-2 max-h-80 overflow-y-auto">
+          {calculations.map((calc) => (
+            <div key={calc.id} className="flex items-center justify-between p-2 border rounded hover:bg-gray-50">
+              <div>
+                <p className="font-medium">{calc.businessName}</p>
+                <p className="text-xs text-gray-500">{formatDate(calc.createdAt)}</p>
+              </div>
+              <div className="flex gap-1">
+                <button onClick={() => calc.id && onLoad(calc.id)} className="p-1 text-blue-600" title="Lihat">
+                  <Eye size={18} />
+                </button>
+                <button onClick={() => calc.id && onExport(calc)} className="p-1 text-green-600" title="Export Excel">
+                  <Download size={18} />
+                </button>
+                <button onClick={() => calc.id && onDelete(calc.id)} className="p-1 text-red-600" title="Hapus">
+                  <Trash2 size={18} />
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
   );
-}
+};
+
+export default HistoryPanel;
